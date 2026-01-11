@@ -1,0 +1,3 @@
+Employees may work remotely up to 3 days per week.
+Remote work requires manager approval.
+Employees must be available during core working hours.
