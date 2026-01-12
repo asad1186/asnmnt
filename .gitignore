@@ -13,4 +13,6 @@ venv/
 .env
 __pycache__/
 embeddings/
+embeddings_new
+embeddings_old
 *.pyc

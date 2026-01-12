@@ -1,4 +1,4 @@
-from app.prompts import AGENT_SYSTEM_PROMPT
+from app.prompts import AGENT_SYSTEM_PROMPT,decision_prompt
 
 class AIAgent:
     def __init__(self, llm_client, tools, memory):
@@ -6,22 +6,15 @@ class AIAgent:
         self.tools = tools
         self.memory = memory
 
-    def decide_and_answer(self, query: str, session_id: str | None = None):
-        # -------- 1️⃣ Decision step (ISOLATED) --------
+
+    def decide_and_answer(self, query: str, session_id: str = None):
+
         decision_messages = [
-            {"role": "system", "content": AGENT_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    "Decide if the following question requires internal documents.\n"
-                    "Answer only with 'direct' or 'tool'.\n\n"
-                    f"Question: {query}"
-                )
-            }
-        ]
-
+            {"role": "system", "content": decision_prompt},
+            {"role": "user", "content": query}
+]
         decision = self.llm.chat(decision_messages).strip().lower()
-
+        print('decision:',decision)
         # -------- 2️⃣ Prepare answer prompt --------
         history = self.memory.get(session_id) if session_id else []
 
@@ -30,11 +23,10 @@ class AIAgent:
         ] + history
 
         sources = []
-
-        # -------- 3️⃣ Tool usage --------
+    
         if decision == "tool":
             tool_result = self.tools["retrieve_docs"](query)
-            context = "\n".join(tool_result["chunks"])
+            context = "\n".join(tool_result["context"])
             sources = tool_result["sources"]
 
             answer_messages.append({

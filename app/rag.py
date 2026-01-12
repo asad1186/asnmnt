@@ -1,67 +1,84 @@
 import os
-import faiss
-import pickle
-from openai import OpenAI
 from dotenv import load_dotenv
-import numpy as np
+
+from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings
+
 load_dotenv()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+DOCS_PATH = "data/documents"
+EMBED_DIR = "embeddings"
 
-EMBEDDING_MODEL = "text-embedding-3-small"
-INDEX_PATH = "embeddings/faiss.index"
-DOCS_PATH = "embeddings/docs.pkl"
-
-def load_documents(folder_path="data/documents"):
-    docs = []
-    for file in os.listdir(folder_path):
-        with open(os.path.join(folder_path, file), "r", encoding="utf-8") as f:
-            docs.append({
-                "text": f.read(),
-                "source": file
-            })
-    return docs
+EMBEDDING_MODEL = "text-embedding-3-large"
 
 
-def create_faiss_index():
-    docs = load_documents()
-    texts = [d["text"] for d in docs]
 
-    embeddings = client.embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=texts
-    ).data
+def build_faiss():
+    print("🔧 Building FAISS index...")
 
-    vectors = [e.embedding for e in embeddings]
-    dimension = len(vectors[0])
+    loader = DirectoryLoader(
+        path=DOCS_PATH,
+        glob="**/*.pdf",
+        loader_cls=PyPDFLoader
+    )
 
-    index = faiss.IndexFlatL2(dimension)
-    index.add(np.array(vectors).astype("float32"))
+    documents = loader.load()
+    print(f"📄 Loaded {len(documents)} pages")
 
-    os.makedirs("embeddings", exist_ok=True)
-    faiss.write_index(index, INDEX_PATH)
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=100
+    )
 
-    with open(DOCS_PATH, "wb") as f:
-        pickle.dump(docs, f)
+    docs = text_splitter.split_documents(documents)
+    print(f"✂️ Total chunks: {len(docs)}")
+
+    embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL)
+
+    vectorstore = FAISS.from_documents(docs, embeddings)
+
+    os.makedirs(EMBED_DIR, exist_ok=True)
+    vectorstore.save_local(EMBED_DIR)
+
+    print("✅ FAISS built and saved successfully")
+
+
+def load_or_build_faiss():
+    embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL)
+
+    if os.path.exists(EMBED_DIR):
+        print("📦 Loading existing FAISS index...")
+        return FAISS.load_local(
+            EMBED_DIR,
+            embeddings,
+            allow_dangerous_deserialization=True
+        )
+    else:
+        build_faiss()
+        return FAISS.load_local(
+            EMBED_DIR,
+            embeddings,
+            allow_dangerous_deserialization=True
+        )
+
 
 
 def search(query, k=2):
-    index = faiss.read_index(INDEX_PATH)
+    # ✅ Usage
+    vectorstore = load_or_build_faiss()
+    results = vectorstore.similarity_search(query, k=3)
+    contexts = []
+    sources = []
 
-    with open(DOCS_PATH, "rb") as f:
-        docs = pickle.load(f)
+    for doc in results:
+        contexts.append(doc.page_content)
+        sources.append({
+            "document": doc.metadata.get("source"),
+            "page": doc.metadata.get("page") + 1  # human-readable
+        })
+    sources=list(set([i['document'].split('\\')[-1] for i in sources]))
 
-    query_embedding = client.embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=[query]
-    ).data[0].embedding
-
-    distances, indices = index.search(
-        np.array([query_embedding]).astype("float32"), k
-    )
-
-    results = []
-    for i in indices[0]:
-        results.append(docs[i])
-
-    return results
+    return {'context':contexts,
+            'sources':sources}
