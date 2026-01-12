@@ -78,7 +78,13 @@ def search(query, k=2):
             "document": doc.metadata.get("source"),
             "page": doc.metadata.get("page") + 1  # human-readable
         })
-    sources=list(set([i['document'].split('\\')[-1] for i in sources]))
+    sources = list(
+        set(
+            os.path.basename(i["document"])
+            for i in sources
+            if i.get("document")
+        )
+    )
 
     return {'context':contexts,
             'sources':sources}
